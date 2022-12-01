@@ -1,0 +1,16 @@
+#!/usr/bin/env python3
+
+import sys
+
+inputLines = [line.strip() for line in open(sys.argv[1], 'r').readlines()]
+
+elf_food_calories = [[]]
+for line in inputLines:
+  if len(line) > 0:
+    calories = int(line)
+    elf_food_calories[-1].append(calories)
+  else:
+    elf_food_calories.append([])
+
+elf_total_calories = [sum(food) for food in elf_food_calories]
+print(sum(sorted(elf_total_calories)[-3:]))
