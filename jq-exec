@@ -1,0 +1,6 @@
+#!/usr/bin/env bash
+
+JQ_SCRIPT="$1"
+INPUT="$2"
+
+jq -R '.' "$INPUT" | jq -sf "$JQ_SCRIPT"
