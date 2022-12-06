@@ -3,4 +3,4 @@
 JQ_SCRIPT="$1"
 INPUT="$2"
 
-jq -R '.' "$INPUT" | jq -sf "$JQ_SCRIPT"
+jq -R '.' "$INPUT" | jq -L "$(pwd)" -sf "$JQ_SCRIPT"
