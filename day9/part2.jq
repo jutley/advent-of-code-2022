@@ -19,8 +19,7 @@ def update_tail(tail; head):
   | . as $vector
   | map(fabs)
   | if max < 2 then [0,0]
-    elif min == 1 then ($vector | map([., -1] | max | [., 1] | min)) # partial diagonal case
-    else ($vector | map(. / 2)) # straight case or full diagonal case
+    else ($vector | map(. / 2 | round))
     end
   | zip($tail)
   | map(add)
