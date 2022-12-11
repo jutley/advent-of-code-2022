@@ -8,4 +8,4 @@ def intersection(set1; set2): set1 - (set1 - set2);
 
 def group_by_key(key_filter): group_by(key_filter) | map({(.[0] | key_filter | tostring): .}) | add;
 
-def zip($that): . as $this | [length, ($that | length)] | [range(min)] | map([$this[.], $that[.]]);
+def zip($that): [., $that] | transpose;
