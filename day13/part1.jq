@@ -1,46 +1,32 @@
 include "lib";
 
-def get_line_points_for_extremities($p1; $p2):
-  if $p1[0] == $p2[0]
-  then
-    [$p1[0]] +
-    (range(([$p1[1], $p2[1]] | min); ([$p1[1], $p2[1]] | max + 1)) | [.])
+def in_order($left; $right):
+  # {$left, $right} | debug | map_values(type) | debug |
+  if [($left | type), ($right | type)] == ["array", "number"] then
+    in_order($left; [$right])
+  elif [($left | type), ($right | type)] == ["number", "array"] then
+    in_order([$left]; $right)
+  elif [($left | type), ($right | type)] == ["number", "number"] then
+    $right - $left
+  elif ($left | type) == "null" then
+    1
+  elif ($right | type) == "null" then
+    -1
+  elif ($left | length) == 0 and ($right | length) == 0 then
+    0
+  elif ($left | length) > 0 and ($right | length) == 0 then
+    -1
   else
-    (range(([$p1[0], $p2[0]] | min); ([$p1[0], $p2[0]] | max + 1)) | [.]) +
-    [$p1[1]]
+    in_order($left[0]; $right[0])
+    | if . != 0 then .
+      else in_order($left[1:]; $right[1:])
+      end
   end
 ;
 
-def drop_sand($environment; $col; $row):
-  if $environment[$col][$row + 1] == "."
-  then drop_sand($environment; $col; $row + 1)
-  elif $environment[$col - 1][$row + 1] == "."
-  then drop_sand($environment; $col - 1; $row + 1)
-  elif $environment[$col + 1][$row + 1] == "."
-  then drop_sand($environment; $col + 1; $row + 1)
-  else $environment[$col][$row] = "o"
-  end
-;
-
-map(split(" -> ") | map(split(",") | map(tonumber)))
-| map(
-  [.] + [.[1:]] | transpose | map(
-      map(select(. != null))
-      | select(length == 2)
-      | get_line_points_for_extremities(.[0]; .[1])
-    )
-)
-| flatten(1)
-| unique
-| (map(.[0]) | [min - 1, max + 1]) as [$min_col, $max_col]
-| (map(.[1]) | max) as $max_row
-| [range($max_col - $min_col + 1) | [range($max_row + 1) | "."]] as $empty_grid
-| reduce .[] as $point ($empty_grid; .[$point[0] - $min_col][$point[1]] = "#")
-
-| until(transpose | last | contains(["o"]); drop_sand(.; 500 - $min_col; 0))
-
-| map(map(select(. == "o")) | length) | add - 1
-
-# | transpose
-# | map(join(""))
-# | join("\n")
+join("\n") | split("\n\n") | map(split("\n") | map(fromjson) | {left: .[0], right: .[1]})
+| to_entries | map(
+    select(.value | in_order(.left; .right) >= 0)
+    | .key + 1
+  )
+| add

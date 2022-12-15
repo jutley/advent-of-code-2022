@@ -1,47 +1,50 @@
 include "lib";
 
-def get_line_points_for_extremities($p1; $p2):
-  if $p1[0] == $p2[0]
-  then
-    [$p1[0]] +
-    (range(([$p1[1], $p2[1]] | min); ([$p1[1], $p2[1]] | max + 1)) | [.])
+def in_order($left; $right):
+  # {$left, $right} | debug | map_values(type) | debug |
+  if [($left | type), ($right | type)] == ["array", "number"] then
+    in_order($left; [$right])
+  elif [($left | type), ($right | type)] == ["number", "array"] then
+    in_order([$left]; $right)
+  elif [($left | type), ($right | type)] == ["number", "number"] then
+    $right - $left
+  elif ($left | type) == "null" then
+    1
+  elif ($right | type) == "null" then
+    -1
+  elif ($left | length) == 0 and ($right | length) == 0 then
+    0
+  elif ($left | length) > 0 and ($right | length) == 0 then
+    -1
   else
-    (range(([$p1[0], $p2[0]] | min); ([$p1[0], $p2[0]] | max + 1)) | [.]) +
-    [$p1[1]]
+    in_order($left[0]; $right[0])
+    | if . != 0 then .
+      else in_order($left[1:]; $right[1:])
+      end
   end
 ;
 
-def drop_sand($environment; $col; $row):
-  if $environment[$col][$row + 1] == "."
-  then drop_sand($environment; $col; $row + 1)
-  elif $environment[$col - 1][$row + 1] == "."
-  then drop_sand($environment; $col - 1; $row + 1)
-  elif $environment[$col + 1][$row + 1] == "."
-  then drop_sand($environment; $col + 1; $row + 1)
-  else $environment[$col][$row] = "o"
+def merge_sort:
+  def merge($sorted_left; $sorted_right; $acc):
+    if $sorted_left | length == 0 then $acc + $sorted_right
+    elif $sorted_right | length == 0 then $acc + $sorted_left
+    elif in_order($sorted_left; $sorted_right) < 0 then merge($sorted_left[1:]; $sorted_right; $acc + [$sorted_left[0]])
+    else merge($sorted_left; $sorted_right[1:]; $acc + [$sorted_right[0]])
+    end
+  ;
+
+  if length <= 1 then .
+  else
+    (length / 2 | floor) as $mid
+    | (.[:$mid] | merge_sort) as $sorted_left
+    | (.[$mid:] | merge_sort) as $sorted_right
+    | merge($sorted_left; $sorted_right; [])
   end
 ;
 
-map(split(" -> ") | map(split(",") | map(tonumber)))
-| map(
-  [.] + [.[1:]] | transpose | map(
-      map(select(. != null))
-      | select(length == 2)
-      | get_line_points_for_extremities(.[0]; .[1])
-    )
-)
-| flatten(1)
-| unique
-| (map(.[1]) | max + 2) as $max_row
-| (map(.[0]) | [min - $max_row, max + $max_row]) as [$min_col, $max_col]
-| [range($max_col - $min_col + 1) | [range($max_row + 1) | "."]] as $empty_grid
-| reduce .[] as $point ($empty_grid; .[$point[0] - $min_col][$point[1]] = "#")
-| map(last = "#")
-
-| until(.[500 - $min_col][0] == "o"; drop_sand(.; 500 - $min_col; 0))
-
-| map(map(select(. == "o")) | length) | add
-
-# | transpose
-# | map(join(""))
-# | join("\n")
+map(select(length > 0) | fromjson) + [[[2]], [[6]]]
+| merge_sort
+| reverse
+| to_entries
+| map(select(.value == [[2]] or .value == [[6]]) | .key + 1)
+| .[0] * .[1]
