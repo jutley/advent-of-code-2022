@@ -2,7 +2,11 @@ include "lib";
 
 def parse: map(split(",") | map(tonumber) as [$x, $y, $z] | {$x, $y, $z});
 
-def cube_adjacent_to_face($x; $y; $z; $face):
+def add_vectors($v1; $v2): [$v1, $v2] | transpose | map(add);
+
+def flip_face($face): $face | if endswith("+") then sub("\\+"; "-") else sub("-"; "\\+") end;
+
+def relative_cube_adjacent_to_face($x; $y; $z; $face):
   {
     "x-": [-1,  0,  0],
     "x+": [ 1,  0,  0],
@@ -11,9 +15,10 @@ def cube_adjacent_to_face($x; $y; $z; $face):
     "z-": [ 0,  0, -1],
     "z+": [ 0,  0,  1]
   }[face]
-  | [[$x, $y, $z], .]
-  | transpose | map(add)
 ;
+
+def cube_adjacent_to_face($x; $y; $z; $face):
+  relative_cube_adjacent_to_face($x; $y; $z; $face) | add_vectors([$x, $y, $z]; .);
 
 def set_cube_face_visibility($cube_face_visibility):
   to_entries | map(
@@ -33,43 +38,85 @@ def set_cube_face_visibility($cube_face_visibility):
   )))
 ;
 
-def edges_for_face($x; $y; $z; $face; $cube_face_visibility):
-  $face | split("") as [$dim, $dir_sign]
-  | {"+": 1, "-": -1}[$dir_sign] as $dir_num
-  | [[-1, 0], [1, 0], [0, -1], [0, 1]] as $start
-  | ["x", "y", "z"] | index($dim) as $i
+def cube_exists_at($x; $y; $z; $cube_face_visibility):
+  [$x, $y, $z]
+  | min >= 0
+    and max < ($cube_face_visibility | length)
+    and $cube_face_visibility[$x][$y][$z]
+;
 
-  | $start | map(.[$i:$i] = [0] | . + [$face]) as $first_part
+def face_exists_and_is_uncovered($x; $y; $z; $face; $cube_face_visibility):
+  cube_exists_at($x; $y; $z; $cube_face_visibility)
+    and (cube_adjacent_to_face($x; $y; $z; $face)
+      | cube_exists_at(.[0]; .[1]; .[2]; $cube_face_visibility) == false
+    )
+;
 
-  | $start | map(.[$i:$i] = [$dir_num]) as $second_part_cube
-  | ["x", "y", "z"] | del(.[$i]) | [.,.] | transpose | flatten as $dim_overlay
-  | ["+", "-"] | (. + .) as $dir_overlay
-  | [$dim_overlay, $dir_overlay] | transpose | map(add) as $face_overlay
-  | [$second_part_cube, $face_overlay] | transpose | map(.[0] + [.[1]]) as $second_part
+def surrounding_cubes_with_face_offset($x; $y; $z; $dimension_idx; $face_offset):
+  [[-1, 0], [1, 0], [0, -1], [0, 1]] | map(.[$dimension_idx:$dimension_idx] = [$face_offset]);
 
-  # TODO these should only be included if there isn't a cube kitty corner
-  | ($face_overlay | map([0, 0, 0, .]))
-  | map(select(last as $adj_face |
-      [$face, $adj_face] | map({
-        "x-": [-1, 0, 0], "x+": [1, 0, 0],
-        "y-": [0, -1, 0], "y+": [0, 1, 0],
-        "z-": [0, 0, -1], "z+": [0, 0, 1]
-      }[.]) | transpose | map(add)
-      | [., [$x, $y, $z]] | transpose | map(add)
+def planar_edges_for_face($face_context; $cube_face_visibility):
+  $face_context as {$x, $y, $z, $face, $dimension_idx, $adj_cubes}
+  | $adj_cubes
+  | map(. + [$face])
+
+  | map(
+      select(face_exists_and_is_uncovered(.[0]; .[1]; .[2]; .[3]; $cube_face_visibility))
+      | tojson
+    )
+;
+
+def corner_edges_for_face($face_context; $cube_face_visibility):
+  $face_context as {$x, $y, $z, $face, $dimension_idx, $direction_num, $adj_faces, $adj_cubes}
+
+  | surrounding_cubes_with_face_offset($x; $y; $z; $dimension_idx; $direction_num) as $second_part_cube
+  | $adj_cubes | map(add_vectors(.; relative_cube_adjacent_to_face($x; $y; $z; $face)))
+  | [$second_part_cube, $adj_faces] | transpose | map(.[0] + [.[1]])
+
+  | map(
+      .[:3] |= add_vectors(.; [$x, $y, $z])
+      | select(face_exists_and_is_uncovered(.[0]; .[1]; .[2]; .[3]; $cube_face_visibility))
+      | tojson
+    )
+;
+
+def self_edges_for_face($face_context; $cube_face_visibility):
+  $face_context as {$x, $y, $z, $face, $adj_faces}
+
+  | ($adj_faces | map([0, 0, 0, .]))
+  | map(select(last as $adj_face
+      | cube_adjacent_to_face($x; $y; $z; $face) as [$tmpx, $tmpy, $tmpz]
+      | cube_adjacent_to_face($tmpx; $tmpy; $tmpz; $adj_face)
       | min < 0 or max >= ($cube_face_visibility | length)
         or $cube_face_visibility[.[0]][.[1]][.[2]] == false
-    )) as $third_part
+    ))
 
-  | $first_part + $second_part + $third_part
-
-  | map(.[:3] |= ([., [$x, $y, $z]] | transpose | map(add)))
   | map(
-      . as [$nx, $ny, $nz, $nf]
-      | select((.[:3] | min) >= 0)
-      | select((.[:3] | max) < ($cube_face_visibility | length))
-      | select($cube_face_visibility[$nx][$ny][$nz] and $cube_face_visibility[$nx][$ny][$nz][$nf])
+      .[:3] |= add_vectors(.; [$x, $y, $z])
+      | select(face_exists_and_is_uncovered(.[0]; .[1]; .[2]; .[3]; $cube_face_visibility))
+      | tojson
     )
-  | map(tojson)
+;
+
+def edges_for_face($x; $y; $z; $face; $cube_face_visibility):
+  if face_exists_and_is_uncovered($x; $y; $z; $face; $cube_face_visibility) | not
+  then []
+  else
+    $face | split("") as [$dimension, $direction_sign]
+    | {"+": 1, "-": -1}[$direction_sign] as $direction_num
+    | ["x", "y", "z"] | index($dimension) as $dimension_idx
+    | ["x", "y", "z"] | del(.[$dimension_idx]) | [.,.] | transpose | flatten as $dim_overlay
+    | ["+", "-"] | (. + .) as $dir_overlay
+    | [$dim_overlay, $dir_overlay] | transpose | map(add) as $adj_faces
+    | $adj_faces | map(cube_adjacent_to_face($x; $y; $z; .)) as $adj_cubes
+
+    | {$x, $y, $z, $face, $dimension, $dimension_idx, $direction_sign, $direction_num, $adj_faces, $adj_cubes} as $face_context
+
+    | planar_edges_for_face($face_context; $cube_face_visibility) as $planar_edges
+    | corner_edges_for_face($face_context; $cube_face_visibility) as $corner_edges
+    | self_edges_for_face($face_context; $cube_face_visibility) as $self_edges
+    | $planar_edges + $corner_edges + $self_edges
+  end
 ;
 
 parse
@@ -124,8 +171,3 @@ parse
     | .seen_faces |= (. + $graph[$face] | sort | unique)
   )
 | .visited_faces | length
-
-
-# reduce $graph[.][] as $adj_face ([$initial_face];)
-
-# edges_for_face(0; 0; 0; "x+"; {})
