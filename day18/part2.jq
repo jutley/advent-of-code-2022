@@ -2,7 +2,7 @@ include "lib";
 
 def parse: map(split(",") | map(tonumber) as [$x, $y, $z] | {$x, $y, $z});
 
-def add_vectors($v1; $v2): [$v1, $v2] | transpose | map(add);
+def add_vectors($v): [., $v] | transpose | map(add);
 
 def flip_face($face): $face | if endswith("+") then sub("\\+"; "-") else sub("-"; "+") end;
 
@@ -18,10 +18,10 @@ def relative_cube_adjacent_to_face($face):
 ;
 
 def cube_adjacent_to_face($x; $y; $z; $face):
-  relative_cube_adjacent_to_face($face) | add_vectors([$x, $y, $z]; .);
+  relative_cube_adjacent_to_face($face) | add_vectors([$x, $y, $z]);
 
-def set_cube_face_visibility($cube_face_visibility):
-  to_entries | map(
+def set_cube_face_visibility:
+  . as $cube_face_visibility | to_entries | map(
     .key as $x | .value | to_entries | map(
       .key as $y | .value | to_entries | map(
         .key as $z | .value
@@ -36,6 +36,16 @@ def set_cube_face_visibility($cube_face_visibility):
               )
           ) else . end
   )))
+;
+
+def generate_cube_face_visibility($input):
+  $input
+  | (map(.[]) | max + 1) as $max_idx
+  | [range($max_idx) | false] as $empty_segment
+  | ($empty_segment | map($empty_segment | map($empty_segment))) as $space
+  | ([["x", "y", "z"], ["+", "-"]] | [combinations | join("") | {(.): true}] | add) as $default_face_visibility
+  | reduce .[] as $cube ($space; .[$cube.x][$cube.y][$cube.z] = $default_face_visibility)
+  | set_cube_face_visibility
 ;
 
 def cube_exists_at($x; $y; $z; $cube_face_visibility):
@@ -67,7 +77,7 @@ def planar_edges_for_face($face_context; $cube_face_visibility):
 
 def corner_edges_for_face($face_context; $cube_face_visibility):
   $face_context as {$face, $adj_faces, $adj_cubes}
-  | $adj_cubes | map(add_vectors(.; relative_cube_adjacent_to_face($face))) as $cubes
+  | $adj_cubes | map(add_vectors(relative_cube_adjacent_to_face($face))) as $cubes
   | $adj_faces | map(flip_face(.)) as $faces
   | [$cubes, $faces] | transpose | map(
       .[0] + [.[1]]
@@ -78,7 +88,7 @@ def corner_edges_for_face($face_context; $cube_face_visibility):
 
 def self_edges_for_face($face_context; $cube_face_visibility):
   $face_context as {$x, $y, $z, $face, $adj_cubes, $adj_faces}
-  | $adj_cubes | map(add_vectors(.; relative_cube_adjacent_to_face($face)))
+  | $adj_cubes | map(add_vectors(relative_cube_adjacent_to_face($face)))
   | [., $adj_faces] | transpose | map(
       select(cube_exists_at(.[0][0]; .[0][1]; .[0][2]; $cube_face_visibility) | not)
       | [$x, $y, $z, .[1]]
@@ -107,55 +117,45 @@ def edges_for_face($x; $y; $z; $face; $cube_face_visibility):
   end
 ;
 
-parse
-| . as $input
-| [range(map(.[]) | max + 1) | false] as $empty_segment
-| ($empty_segment | map($empty_segment | map($empty_segment))) as $space
-| . as $tmp | "space" | debug | $tmp
-| ([["x", "y", "z"], ["+", "-"]] | [combinations | join("") | {(.): true}] | add) as $default_face_visible
-| reduce .[] as $cube ($space; .[$cube.x][$cube.y][$cube.z] = $default_face_visible)
-| . as $initial_cube_face_visibility
-| set_cube_face_visibility($initial_cube_face_visibility)
-| . as $tmp | "face visibility" | debug | $tmp
-| . as $cube_face_visibility
-| to_entries | map(
-    .key as $x | .value | to_entries | map(
-      .key as $y | .value | to_entries | map(
-        .key as $z | .value
-        | if . then with_entries(
-            .key as $face
-            | cube_adjacent_to_face($x; $y; $z; $face) as [$nx, $ny, $nz]
-            | .value |= if . then edges_for_face($x; $y; $z; $face; $cube_face_visibility) else . end
-          ) else . end
-  )))
-| . as $tmp | "edges" | debug | $tmp
+def generate_graph($cube_face_visibility):
+  $cube_face_visibility
+  | to_entries | map(
+      .key as $x | .value | to_entries | map(
+        .key as $y | .value | to_entries | map(
+          .key as $z | .value
+          | if . then with_entries(
+              .key as $face
+              | cube_adjacent_to_face($x; $y; $z; $face) as [$nx, $ny, $nz]
+              | .value |= if . then edges_for_face($x; $y; $z; $face; $cube_face_visibility) else . end
+            ) else . end
+          | select(.)
+          | with_entries(select(. and length > 0) | .key=([$x, $y, $z, .key] | tojson))
+    )))
+  | flatten | add | map_values(select(. and length > 0))
+;
 
-| to_entries | map(
-    .key as $x | .value | to_entries | map(
-      .key as $y | .value | to_entries | map(
-        .key as $z | .value
-        | select(.)
-        | with_entries(select(. and length > 0) | .key=([$x, $y, $z, .key] | tojson))
-  )))
-| flatten | add | map_values(select(. and length > 0))
-| . as $tmp | "flattened edges" | debug | $tmp
+def get_initial_edge($input):
+  $input | group_by({y, z}) | first | sort_by(.x) | first | [.x, .y, .z, "x-"] | tojson;
 
-| . as $graph
-| $input | group_by({y, z}) | first | sort_by(.x) | first | [.x, .y, .z, "x-"] | tojson
-| . as $initial_face
-
-| {
-    visited_faces: [],
-    seen_faces: [$initial_face],
-    queue: [$initial_face]
+def accessible_nodes_in_graph($graph; $starting_node):
+  {
+    visited_nodes: [],
+    seen_nodes: [$starting_node],
+    queue: [$starting_node]
   }
-| until(.queue | length == 0;
-    .queue[0] as $face
-    | . as $tmp | .queue | length | debug | $tmp
-    | .visited_faces += [$face]
-    | del(.queue[0])
-    | .seen_faces as $seen_faces
-    | .queue += ($graph[$face] | map(select([.] | inside($seen_faces) | not)))
-    | .seen_faces |= (. + $graph[$face] | sort | unique)
-  )
-| .visited_faces | length
+  | until(.queue | length == 0;
+      .queue[0] as $node
+      | .visited_nodes += [$node]
+      | del(.queue[0])
+      | .seen_nodes as $seen_nodes
+      | .queue += ($graph[$node] | map(select([.] | inside($seen_nodes) | not)))
+      | .seen_nodes |= (. + $graph[$node] | sort | unique)
+    )
+  | .visited_nodes | length
+;
+
+parse as $input
+| generate_cube_face_visibility($input) as $cube_face_visibility
+| generate_graph($cube_face_visibility) as $graph
+| get_initial_edge($input) as $initial_face
+| accessible_nodes_in_graph($graph; $initial_face)
