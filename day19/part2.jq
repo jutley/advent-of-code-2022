@@ -189,8 +189,12 @@ def get_unopinionated_options($max_rates):
 #   | {(.[1]): .[0]}
 # ;
 
+def upper_bound_for_geodes:
+  .resources.geode + geodes_from_robots_purchased_in_all_final_n_minutes(.total_minutes - .minute);
+
 def simulate($max_rates; $best_scenario_so_far):
   if .minute == .total_minutes then {best_scenario_so_far: ., completed_scenarios: 1, abandoned_scenarioes: 0}
+  elif upper_bound_for_geodes <= $best_scenario_so_far.resources.geode then {best_scenario_so_far: null, completed_scenarios: 0, abandoned_scenarioes: 1}
   else
     . as $root
     # | simulate_options_one_extra_step(determine_options($max_rates); $max_rates)
@@ -226,7 +230,7 @@ def simulate($max_rates; $best_scenario_so_far):
   end
 ;
 
-parse[:1]
+parse[:3]
 | map( # .)[0] |
     {
       minute: 0,
@@ -254,17 +258,17 @@ parse[:1]
     #     process_option(get_unopinionated_options($max_rates)["clay"]; "clay")
     #   )
     # | debug | halt
-    | process_option(5; "ore")
-    | process_option(2; "clay")
-    | process_option(1; "clay")
-    | process_option(1; "clay")
-    | process_option(1; "clay")
-    | process_option(1; "clay")
-    | process_option(1; "clay")
-    | process_option(1; "clay")
-    | process_option(1; "obsidian")
-    | process_option(2; "obsidian")
-    | process_option(1; "obsidian")
+    # | process_option(5; "ore")
+    # | process_option(2; "clay")
+    # | process_option(1; "clay")
+    # | process_option(1; "clay")
+    # | process_option(1; "clay")
+    # | process_option(1; "clay")
+    # | process_option(1; "clay")
+    # | process_option(1; "clay")
+    # | process_option(1; "obsidian")
+    # | process_option(2; "obsidian")
+    # | process_option(1; "obsidian")
     # | process_option(2; "obsidian")
     # | process_option(1; "geode")
     # | process_option(1; "obsidian")
@@ -359,6 +363,6 @@ parse[:1]
     # | . as $root | determine_options($max_rates) | debug | $root
     # | simulate_options_one_extra_step(determine_options($max_rates); $max_rates)
   )
-# | map(.resources.geode)
-# | debug
-# | reduce .[] as $i (1; . * $i)
+| map(.best_scenario_so_far.resources.geode)
+| debug
+| reduce .[] as $i (1; . * $i)
