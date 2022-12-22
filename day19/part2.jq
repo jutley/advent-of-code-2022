@@ -30,16 +30,20 @@ def buy($resource):
   | reduce (.costs[$resource] | to_entries[]) as $cost (.;
       .resources[$cost.key] -= $cost.value
     )
-  | .rates[$resource] += 1
+  | if $resource == "geode"
+    then .resources.geode += .total_minutes - .minute
+    else .rates[$resource] += 1
+    end
 ;
 
 def process_option($wait_time; $resource):
   . as $root
-  # | ([range(.minute) | " "] | join("") + "wait \($wait_time) for \($resource) (minute \($root.minute))") | debug | $root
   | reduce range($wait_time) as $_ (.; harvest)
   | buy($resource)
   | .options += [$wait_time, $resource]
 ;
+
+def geodes_from_robots_purchased_in_all_final_n_minutes($n): $n * ($n / 2 - 0.5);
 
 def resource_will_last_for_duration_at_rate($resource; $minutes; $rate):
   (.resources[$resource] - $minutes * ($rate - .rates[$resource])) >= 0;
@@ -53,16 +57,16 @@ def geode_robots_at_current_rates:
   | min
 ;
 
-def max_geodes_with_only_new_geode_robots:
-  . as $root
-  | reduce range($root.total_minutes - $root.minute) as $_ ($root;
-    if .resources.ore >= .costs.geode.ore and .resources.obsidian >= .costs.geode.obsidian
-    then process_option(1; "geode")
-    else harvest
-    end
-  )
-  | .resources.geode
-;
+# def max_geodes_with_only_new_geode_robots:
+#   . as $root
+#   | reduce range($root.total_minutes - $root.minute) as $_ ($root;
+#     if .resources.ore >= .costs.geode.ore and .resources.obsidian >= .costs.geode.obsidian
+#     then process_option(1; "geode")
+#     else harvest
+#     end
+#   )
+#   | .resources.geode
+# ;
 
 def determine_options($max_rates):
   if .minute == .total_minutes then {}
@@ -70,7 +74,7 @@ def determine_options($max_rates):
     . as $root
     | ["ore", "clay", "obsidian", "geode"] as $all_resources
     | (.total_minutes - 1 - .minute) as $days_for_buying
-    | (if geode_robots_at_current_rates >= $days_for_buying - 2
+    | (if geode_robots_at_current_rates >= $days_for_buying - 1
       then ["geode"]
       else
         if $root.rates.geode > 0 then ["geode", "obsidian"]
@@ -136,79 +140,93 @@ def get_unopinionated_options($max_rates):
   end
 ;
 
-def get_all_possibilties_after_n_steps($n; $max_rates):
-  if .minute == .total_minutes or $n == 0 then [.n = $n]
-  else
-    . as $root
-    | get_unopinionated_options($max_rates)
-    | if length == 0 then
-        [$root | .n = $n]
-      else
-        to_entries
-        | map(
-            . as {key: $resource, value: $wait_time}
-            | $root
-            | process_option($wait_time; $resource)
-            | get_all_possibilties_after_n_steps($n - 1; $max_rates)
-          )
-        | flatten
-      end
-  end
-;
+# def get_all_possibilties_after_n_steps($n; $max_rates):
+#   if .minute == .total_minutes or $n == 0 then [.n = $n]
+#   else
+#     . as $root
+#     | get_unopinionated_options($max_rates)
+#     | if length == 0 then
+#         [$root | .n = $n]
+#       else
+#         to_entries
+#         | map(
+#             . as {key: $resource, value: $wait_time}
+#             | $root
+#             | process_option($wait_time; $resource)
+#             | get_all_possibilties_after_n_steps($n - 1; $max_rates)
+#           )
+#         | flatten
+#       end
+#   end
+# ;
 
 # filter resources where buying a different resource can lead to buying the original resources at the same minute of sooner
 
-def simulate_options_one_extra_step($options; $max_rates):
-  . as $root
-  | $options | with_entries(select(
-      . as {key: $resource_under_consideration, value: $original_wait_time}
-      | $root.costs[$resource_under_consideration] | to_entries | any(
-          .key as $intermediate_resource
-          | $options[$intermediate_resource] as $intermediate_wait_time
-          | $intermediate_wait_time != null and (
-              $root
-              | process_option($intermediate_wait_time; $intermediate_resource)
-              | determine_options($max_rates) as $new_options
-              | $new_options[$resource_under_consideration] != null
-                and $intermediate_wait_time + $new_options[$resource_under_consideration] < $original_wait_time
-            )
-        )
-      | not
-  ))
-;
+# def simulate_options_one_extra_step($options; $max_rates):
+#   . as $root
+#   | $options | with_entries(select(
+#       . as {key: $resource_under_consideration, value: $original_wait_time}
+#       | $root.costs[$resource_under_consideration] | to_entries | any(
+#           .key as $intermediate_resource
+#           | $options[$intermediate_resource] as $intermediate_wait_time
+#           | $intermediate_wait_time != null and (
+#               $root
+#               | process_option($intermediate_wait_time; $intermediate_resource)
+#               | determine_options($max_rates) as $new_options
+#               | $new_options[$resource_under_consideration] != null
+#                 and $intermediate_wait_time + $new_options[$resource_under_consideration] < $original_wait_time
+#             )
+#         )
+#       | not
+#   ))
+# ;
 
-def get_recommended_option_via_partial_simulation($max_rates):
-  (.options | length / 2) as $steps_so_far
-  | get_all_possibilties_after_n_steps(10; $max_rates)
-  | max_by(max_geodes_with_only_new_geode_robots)
-  | .options[$steps_so_far * 2:] | debug
-  | {(.[1]): .[0]}
-;
+# def get_recommended_option_via_partial_simulation($max_rates):
+#   (.options | length / 2) as $steps_so_far
+#   | get_all_possibilties_after_n_steps(10; $max_rates)
+#   | max_by(max_geodes_with_only_new_geode_robots)
+#   | .options[$steps_so_far * 2:] | debug
+#   | {(.[1]): .[0]}
+# ;
 
-def simulate($max_rates):
-  if .minute == .total_minutes then .
+def simulate($max_rates; $best_scenario_so_far):
+  if .minute == .total_minutes then {best_scenario_so_far: ., completed_scenarios: 1, abandoned_scenarioes: 0}
   else
     . as $root
-    | simulate_options_one_extra_step(determine_options($max_rates); $max_rates)
-    # | determine_options($max_rates)
-    | if ($root.rates.geode > 0 and .geode == null) then
-        reduce range($root.total_minutes - $root.minute) as $_ ($root; harvest)
-        | .total_scenarios = 1
+    # | simulate_options_one_extra_step(determine_options($max_rates); $max_rates)
+    | get_unopinionated_options($max_rates)
+    | if length == 0 then $root | harvest | simulate($max_rates; $best_scenario_so_far)
       else
-        to_entries | map(
-          . as {key: $resource, value: $wait_time}
+        reduce to_entries[] as {key: $resource, value: $wait_time} ({$best_scenario_so_far, completed_scenarios: 0, abandoned_scenarioes: 0};
+          . as $acc
+          # | [$resource, $wait_time] | debug
           | $root
           | process_option($wait_time; $resource)
-          | simulate($max_rates)
+          | simulate($max_rates; $acc.best_scenario_so_far) as $simulation_result
+          | $acc
+          | .best_scenario_so_far =
+              if $simulation_result.best_scenario_so_far.resources.geode > $acc.best_scenario_so_far.resources.geode
+              then $simulation_result.best_scenario_so_far
+              else $acc.best_scenario_so_far
+              end
+          | .completed_scenarios += $simulation_result.completed_scenarios
+          | .abandoned_scenarioes += $simulation_result.abandoned_scenarioes
         )
-        | (map(.total_scenarios) | add) as $total_scenarios
-        | max_by(.resources.geode)
-        | .total_scenarios = $total_scenarios
+
+        # to_entries | map(
+        #   . as {key: $resource, value: $wait_time}
+        #   | $root
+        #   | process_option($wait_time; $resource)
+        #   | simulate($max_rates; null)
+        # )
+        # | (map(.completed_scenarios) | add) as $completed_scenarios
+        # | max_by(.resources.geode)
+        # | .completed_scenarios = $completed_scenarios
       end
   end
 ;
 
-parse[:3]
+parse[:1]
 | map( # .)[0] |
     {
       minute: 0,
@@ -226,7 +244,7 @@ parse[:3]
         clay: $root.costs.obsidian.clay,
         obsidian: $root.costs.geode.obsidian
       } as $max_rates
-    | simulate($max_rates)
+    # | simulate($max_rates)
 
     # | until(.rates.ore == (.costs | del(.ore) | map(.ore) | min | 3);
     #     process_option(get_unopinionated_options($max_rates)["ore"]; "ore")
@@ -236,17 +254,17 @@ parse[:3]
     #     process_option(get_unopinionated_options($max_rates)["clay"]; "clay")
     #   )
     # | debug | halt
-    # | process_option(5; "ore")
-    # | process_option(2; "clay")
-    # | process_option(1; "clay")
-    # | process_option(1; "clay")
-    # | process_option(1; "clay")
-    # | process_option(1; "clay")
-    # | process_option(1; "clay")
-    # | process_option(1; "clay")
-    # | process_option(1; "obsidian")
-    # | process_option(2; "obsidian")
-    # | process_option(1; "obsidian")
+    | process_option(5; "ore")
+    | process_option(2; "clay")
+    | process_option(1; "clay")
+    | process_option(1; "clay")
+    | process_option(1; "clay")
+    | process_option(1; "clay")
+    | process_option(1; "clay")
+    | process_option(1; "clay")
+    | process_option(1; "obsidian")
+    | process_option(2; "obsidian")
+    | process_option(1; "obsidian")
     # | process_option(2; "obsidian")
     # | process_option(1; "geode")
     # | process_option(1; "obsidian")
@@ -261,6 +279,8 @@ parse[:3]
     # | process_option(1; "geode")
     # | process_option(1; "geode")
     # | harvest
+
+    | simulate($max_rates; null)
 
     # | process_option(3; "ore")
     # | process_option(2; "ore")
@@ -339,6 +359,6 @@ parse[:3]
     # | . as $root | determine_options($max_rates) | debug | $root
     # | simulate_options_one_extra_step(determine_options($max_rates); $max_rates)
   )
-| map(.resources.geode)
-| debug
-| reduce .[] as $i (1; . * $i)
+# | map(.resources.geode)
+# | debug
+# | reduce .[] as $i (1; . * $i)
